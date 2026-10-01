@@ -1,23 +1,27 @@
 <?php
 date_default_timezone_set('Asia/Jakarta');
 
-$host = "localhost";
-$user = "root";
-$password = "";
-$database = "absensi_sekolah";
+// Mengambil konfigurasi dari Environment Variable Railway (atau fallback ke Localhost)
+$host     = getenv('MYSQLHOST') ?: 'localhost';
+$user     = getenv('MYSQLUSER') ?: 'root';$password = getenv('MYSQLPASSWORD') ?: '';
+$database = getenv('MYSQLDATABASE') ?: 'absensi_sekolah';$port     = getenv('MYSQLPORT') ?: '3306';
 
-$conn = @mysqli_connect($host, $user, $password);
+// Koneksi langsung ke host dan port
+$conn = @mysqli_connect($host,$user, $password, '', (int)$port);
 
 if (!$conn) {
     die("Koneksi database server gagal: " . mysqli_connect_error());
 }
 
-// Pastikan database ada
-mysqli_query($conn, "CREATE DATABASE IF NOT EXISTS `$database` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
-mysqli_select_db($conn, $database);
+// 1. Abaikan pembuatan database jika berjalan di Railway (karena nama DB sudah ditentukan sistem Railway)
+if (!getenv('MYSQLHOST')) {
+    mysqli_query($conn, "CREATE DATABASE IF NOT EXISTS `$database` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
+}
+
+mysqli_select_db($conn,$database);
 mysqli_set_charset($conn, "utf8mb4");
 
-// Buat tabel jika belum tersedia
+// 2. Buat tabel jika belum tersedia
 mysqli_query($conn, "CREATE TABLE IF NOT EXISTS `pengaturan` (
     `id` INT PRIMARY KEY,
     `nama_sekolah` VARCHAR(150) NOT NULL,
