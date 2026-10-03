@@ -25,11 +25,8 @@ $setting = mysqli_fetch_assoc($q_set);
 $nama_sekolah = $setting['nama_sekolah'] ?? 'MTs Matholiul Huda Tlogowungu';
 $jam_masuk = $setting['jam_masuk'] ?? '07:00:00';
 
-// Ambil IP lokal server
-$server_ip = gethostbyname(gethostname());
-if ($server_ip === '127.0.0.1' && isset($_SERVER['SERVER_ADDR']) && $_SERVER['SERVER_ADDR'] !== '::1') {
-    $server_ip = $_SERVER['SERVER_ADDR'];
-}
+// URL API ONLINE RAILWAY
+$server_api = "https://absensi-production-5b61.up.railway.app/api_absensi.php";
 
 // Ambil daftar siswa aktif untuk modal simulasi
 $q_siswa_simulasi = mysqli_query($conn, "SELECT id, nis, nama, kelas, uid_rfid FROM siswa WHERE status = 'aktif' ORDER BY kelas ASC, nama ASC");
@@ -413,7 +410,7 @@ $q_siswa_simulasi = mysqli_query($conn, "SELECT id, nis, nama, kelas, uid_rfid F
                         </div>
                     </div>
                     <span class="badge bg-success rounded-pill px-3 py-2 font-mono small d-flex align-items-center gap-1">
-                        <i class="bi bi-wifi"></i> WiFi: IMS_SAKATECH
+                        <i class="bi bi-wifi"></i> WiFi: kelompok_2
                     </span>
                 </div>
 
@@ -441,10 +438,10 @@ $q_siswa_simulasi = mysqli_query($conn, "SELECT id, nis, nama, kelas, uid_rfid F
                         </button>
                     </div>
                     <code id="apiCodeDisplay" class="d-block font-mono bg-black bg-opacity-60 text-info p-2 rounded small text-break user-select-all">
-                        http://<?= $server_ip ?>/absensi/api_absensi.php?uid=KODE_RFID
+                        <?= $server_api ?>?uid=KODE_RFID
                     </code>
                     <div class="d-flex justify-content-between align-items-center mt-2 pt-2 border-top border-secondary border-opacity-25 text-white-50" style="font-size: 0.75rem;">
-                        <span><i class="bi bi-router me-1"></i> SSID: <strong class="text-light">IMS_SAKATECH</strong></span>
+                        <span><i class="bi bi-router me-1"></i> SSID: <strong class="text-light">kelompok_2</strong></span>
                         <span><i class="bi bi-clock me-1"></i> Polling: <span class="text-success font-monospace" id="pollStatus">Aktif (1.5s)</span></span>
                     </div>
                 </div>
