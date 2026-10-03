@@ -25,6 +25,36 @@ if (isset($_REQUEST['uid'])) {
 
 $format = isset($_REQUEST['format']) ? strtolower(trim($_REQUEST['format'])) : 'json';
 
+// ============================================================
+// TAMBAHAN: AMBIL NAMA WIFI DARI ESP32
+// ============================================================
+$wifi_ssid = isset($_REQUEST['ssid']) ? trim($_REQUEST['ssid']) : '';
+
+if (!empty($wifi_ssid)) {
+    // Membuat tabel status WiFi jika belum ada
+    mysqli_query($conn, "
+        CREATE TABLE IF NOT EXISTS wifi_status (
+            id INT NOT NULL PRIMARY KEY,
+            ssid VARCHAR(255) NOT NULL,
+            waktu_update DATETIME NOT NULL
+        )
+    ");
+
+    // Simpan SSID terakhir dari ESP32
+    $wifi_ssid_esc = mysqli_real_escape_string($conn, $wifi_ssid);
+
+    mysqli_query($conn, "
+        INSERT INTO wifi_status (id, ssid, waktu_update)
+        VALUES (1, '$wifi_ssid_esc', NOW())
+        ON DUPLICATE KEY UPDATE
+            ssid = '$wifi_ssid_esc',
+            waktu_update = NOW()
+    ");
+}
+
+// ============================================================
+// CEK UID
+// ============================================================
 if (empty($raw_uid)) {
     http_response_code(400);
     $response = [
@@ -32,10 +62,12 @@ if (empty($raw_uid)) {
         "message" => "Parameter UID tidak ditemukan. Gunakan: ?uid=KODE_RFID",
         "sound" => "error"
     ];
+
     if ($format === 'text') {
         echo "ERROR:\nUID KOSONG";
         exit;
     }
+
     echo json_encode($response, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
     exit;
 }
@@ -49,13 +81,16 @@ $query_setting = mysqli_query($conn, "SELECT jam_masuk, jam_pulang, nama_sekolah
 $jam_masuk = "07:00:00";
 $jam_pulang = "13:00:00";
 $nama_sekolah = "MTs Matholiul Huda Tlogowungu";
+
 if ($query_setting && $setting = mysqli_fetch_assoc($query_setting)) {
     if (!empty($setting['jam_masuk'])) {
         $jam_masuk = $setting['jam_masuk'];
     }
+
     if (!empty($setting['jam_pulang'])) {
         $jam_pulang = $setting['jam_pulang'];
     }
+
     if (!empty($setting['nama_sekolah'])) {
         $nama_sekolah = $setting['nama_sekolah'];
     }
@@ -66,6 +101,7 @@ $mode_tap = isset($_REQUEST['mode']) ? strtolower(trim($_REQUEST['mode'])) : 'au
 
 // Cari siswa berdasarkan UID RFID
 $clean_uid_esc = mysqli_real_escape_string($conn, $clean_uid);
+
 $query_siswa = mysqli_query($conn, "
     SELECT * FROM siswa 
     WHERE UPPER(REPLACE(REPLACE(REPLACE(uid_rfid, ' ', ''), ':', ''), '-', '')) = '$clean_uid_esc'
@@ -78,9 +114,15 @@ $jam_sekarang = date('H:i:s');
 
 // 1. KASUS: Kartu belum terdaftar
 if (!$query_siswa || mysqli_num_rows($query_siswa) == 0) {
+
     $ket = "Kartu $formatted_uid belum terdaftar di sistem";
     $ket_esc = mysqli_real_escape_string($conn, $ket);
-    mysqli_query($conn, "INSERT INTO rfid_temp (uid_rfid, waktu, status_scan, keterangan) VALUES ('$formatted_uid', '$waktu_sekarang', 'unregistered', '$ket_esc')");
+
+    mysqli_query($conn, "
+        INSERT INTO rfid_temp 
+        (uid_rfid, waktu, status_scan, keterangan) 
+        VALUES ('$formatted_uid', '$waktu_sekarang', 'unregistered', '$ket_esc')
+    ");
 
     $response = [
         "status" => "unregistered",
@@ -94,6 +136,7 @@ if (!$query_siswa || mysqli_num_rows($query_siswa) == 0) {
         echo "TIDAK TERDAFTAR\n" . substr($formatted_uid, 0, 16);
         exit;
     }
+
     echo json_encode($response, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
     exit;
 }
@@ -106,9 +149,15 @@ $kelas = $siswa['kelas'];
 
 // 2. KASUS: Status siswa tidak aktif
 if (strtolower($siswa['status']) !== 'aktif') {
+
     $ket = "Siswa $nama statusnya tidak aktif";
     $ket_esc = mysqli_real_escape_string($conn, $ket);
-    mysqli_query($conn, "INSERT INTO rfid_temp (uid_rfid, waktu, status_scan, keterangan) VALUES ('$formatted_uid', '$waktu_sekarang', 'inactive', '$ket_esc')");
+
+    mysqli_query($conn, "
+        INSERT INTO rfid_temp 
+        (uid_rfid, waktu, status_scan, keterangan) 
+        VALUES ('$formatted_uid', '$waktu_sekarang', 'inactive', '$ket_esc')
+    ");
 
     $response = [
         "status" => "inactive",
@@ -124,6 +173,7 @@ if (strtolower($siswa['status']) !== 'aktif') {
         echo "NONAKTIF\n" . substr($nama, 0, 16);
         exit;
     }
+
     echo json_encode($response, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
     exit;
 }
@@ -136,6 +186,7 @@ $cek_absen = mysqli_query($conn, "
 ");
 
 if (mysqli_num_rows($cek_absen) > 0) {
+
     $data_absen = mysqli_fetch_assoc($cek_absen);
     $absen_id = (int)$data_absen['id'];
     $jam_masuk_siswa = !empty($data_absen['jam_masuk']) ? $data_absen['jam_masuk'] : $data_absen['jam'];
@@ -144,9 +195,15 @@ if (mysqli_num_rows($cek_absen) > 0) {
 
     // Jika mode eksplisit masuk dipaksa
     if ($mode_tap === 'masuk') {
+
         $ket = "$nama ($kelas) sudah absen masuk pukul $jam_masuk_siswa [$status_masuk]";
         $ket_esc = mysqli_real_escape_string($conn, $ket);
-        mysqli_query($conn, "INSERT INTO rfid_temp (uid_rfid, waktu, status_scan, keterangan) VALUES ('$formatted_uid', '$waktu_sekarang', 'already', '$ket_esc')");
+
+        mysqli_query($conn, "
+            INSERT INTO rfid_temp 
+            (uid_rfid, waktu, status_scan, keterangan) 
+            VALUES ('$formatted_uid', '$waktu_sekarang', 'already', '$ket_esc')
+        ");
 
         $response = [
             "status" => "already",
@@ -160,19 +217,27 @@ if (mysqli_num_rows($cek_absen) > 0) {
             "keterangan" => $status_masuk,
             "sound" => "warning"
         ];
+
         if ($format === 'text') {
             echo "SUDAH ABSEN MASUK\n" . substr($nama, 0, 16);
             exit;
         }
+
         echo json_encode($response, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
         exit;
     }
 
     // Jika siswa SUDAH absen pulang
     if (!empty($jam_pulang_siswa)) {
+
         $ket = "$nama ($kelas) sudah absen pulang pukul $jam_pulang_siswa [{$data_absen['status_pulang']}]";
         $ket_esc = mysqli_real_escape_string($conn, $ket);
-        mysqli_query($conn, "INSERT INTO rfid_temp (uid_rfid, waktu, status_scan, keterangan) VALUES ('$formatted_uid', '$waktu_sekarang', 'already', '$ket_esc')");
+
+        mysqli_query($conn, "
+            INSERT INTO rfid_temp 
+            (uid_rfid, waktu, status_scan, keterangan) 
+            VALUES ('$formatted_uid', '$waktu_sekarang', 'already', '$ket_esc')
+        ");
 
         $response = [
             "status" => "already",
@@ -191,16 +256,24 @@ if (mysqli_num_rows($cek_absen) > 0) {
             echo "SUDAH PULANG\n" . substr($nama, 0, 16);
             exit;
         }
+
         echo json_encode($response, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
         exit;
     }
 
     // Siswa BELUM absen pulang: Cek perlindungan anti double-tap dalam 30 detik dari absen masuk
     $selisih_detik = abs(strtotime($jam_sekarang) - strtotime($jam_masuk_siswa));
+
     if ($mode_tap === 'auto' && $selisih_detik < 30) {
+
         $ket = "$nama ($kelas) baru saja tap masuk ($selisih_detik detik lalu). Tunggu saat jam pulang.";
         $ket_esc = mysqli_real_escape_string($conn, $ket);
-        mysqli_query($conn, "INSERT INTO rfid_temp (uid_rfid, waktu, status_scan, keterangan) VALUES ('$formatted_uid', '$waktu_sekarang', 'already', '$ket_esc')");
+
+        mysqli_query($conn, "
+            INSERT INTO rfid_temp 
+            (uid_rfid, waktu, status_scan, keterangan) 
+            VALUES ('$formatted_uid', '$waktu_sekarang', 'already', '$ket_esc')
+        ");
 
         $response = [
             "status" => "already",
@@ -214,15 +287,17 @@ if (mysqli_num_rows($cek_absen) > 0) {
             "keterangan" => $status_masuk,
             "sound" => "warning"
         ];
+
         if ($format === 'text') {
             echo "BARU SAJA MASUK\n" . substr($nama, 0, 16);
             exit;
         }
+
         echo json_encode($response, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
         exit;
     }
 
-    // Tentukan status kepulangan (Tepat Waktu jika >= 13:00, atau Pulang Cepat jika < 13:00)
+    // Tentukan status kepulangan
     $is_tepat_waktu_pulang = (strtotime($jam_sekarang) >= strtotime($jam_pulang));
     $status_pulang = $is_tepat_waktu_pulang ? 'Tepat Waktu' : 'Pulang Cepat';
     $ket_lcd = $is_tepat_waktu_pulang ? 'Pulang' : 'Plg Cepat';
@@ -234,14 +309,22 @@ if (mysqli_num_rows($cek_absen) > 0) {
     ");
 
     if ($update_pulang) {
+
         $ket = "Absensi Pulang $nama ($kelas) berhasil dicatat [$status_pulang]";
         $ket_esc = mysqli_real_escape_string($conn, $ket);
-        mysqli_query($conn, "INSERT INTO rfid_temp (uid_rfid, waktu, status_scan, keterangan) VALUES ('$formatted_uid', '$waktu_sekarang', 'success_pulang', '$ket_esc')");
+
+        mysqli_query($conn, "
+            INSERT INTO rfid_temp 
+            (uid_rfid, waktu, status_scan, keterangan) 
+            VALUES ('$formatted_uid', '$waktu_sekarang', 'success_pulang', '$ket_esc')
+        ");
 
         $response = [
             "status" => "success",
             "tipe" => "pulang",
-            "message" => ($status_pulang === 'Tepat Waktu') ? "Absensi Pulang Berhasil! Hati-hati di jalan." : "Absensi Pulang Cepat Berhasil dicatat.",
+            "message" => ($status_pulang === 'Tepat Waktu')
+                ? "Absensi Pulang Berhasil! Hati-hati di jalan."
+                : "Absensi Pulang Cepat Berhasil dicatat.",
             "uid" => $formatted_uid,
             "nama" => $nama,
             "nis" => $nis,
@@ -258,25 +341,33 @@ if (mysqli_num_rows($cek_absen) > 0) {
             echo "$ket_lcd\n" . substr($nama, 0, 16);
             exit;
         }
+
         echo json_encode($response, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
         exit;
+
     } else {
+
         http_response_code(500);
+
         $response = [
             "status" => "error",
             "message" => "Gagal menyimpan absensi pulang: " . mysqli_error($conn),
             "sound" => "error"
         ];
+
         echo json_encode($response, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
         exit;
     }
 }
 
 // 4. KASUS: Belum ada rekaman hari ini -> CATAT ABSENSI MASUK
-// Tentukan status kehadiran masuk (Hadir jika <= 07:00, Terlambat jika > 07:00)
-$status_kehadiran = (strtotime($jam_sekarang) <= strtotime($jam_masuk)) ? 'Hadir' : 'Terlambat';
 
-// Jika dipaksa mode pulang padahal belum pernah absen masuk (misal datang langsung saat jam pulang)
+// Tentukan status kehadiran masuk
+$status_kehadiran = (strtotime($jam_sekarang) <= strtotime($jam_masuk))
+    ? 'Hadir'
+    : 'Terlambat';
+
+// Jika dipaksa mode pulang
 $jam_pulang_val = "NULL";
 $status_pulang_val = "NULL";
 $tipe_catat = "masuk";
@@ -284,23 +375,36 @@ $status_scan_tag = "success_masuk";
 
 if ($mode_tap === 'pulang') {
     $jam_pulang_val = "'$jam_sekarang'";
-    $status_pulang_val = (strtotime($jam_sekarang) >= strtotime($jam_pulang)) ? "'Tepat Waktu'" : "'Pulang Cepat'";
+    $status_pulang_val = (strtotime($jam_sekarang) >= strtotime($jam_pulang))
+        ? "'Tepat Waktu'"
+        : "'Pulang Cepat'";
+
     $tipe_catat = "pulang";
     $status_scan_tag = "success_pulang";
 }
 
 $simpan = mysqli_query($conn, "
-    INSERT INTO absensi (siswa_id, tanggal, jam, jam_masuk, jam_pulang, status, status_pulang) 
-    VALUES ($siswa_id, '$tanggal_hari_ini', '$jam_sekarang', '$jam_sekarang', $jam_pulang_val, '$status_kehadiran', $status_pulang_val)
+    INSERT INTO absensi 
+    (siswa_id, tanggal, jam, jam_masuk, jam_pulang, status, status_pulang) 
+    VALUES 
+    ($siswa_id, '$tanggal_hari_ini', '$jam_sekarang', '$jam_sekarang', $jam_pulang_val, '$status_kehadiran', $status_pulang_val)
 ");
 
 if ($simpan) {
+
     $ket = "Absensi Masuk $nama ($kelas) berhasil dicatat sebagai $status_kehadiran";
+
     if ($mode_tap === 'pulang') {
         $ket = "Absensi Masuk & Pulang $nama ($kelas) berhasil dicatat";
     }
+
     $ket_esc = mysqli_real_escape_string($conn, $ket);
-    mysqli_query($conn, "INSERT INTO rfid_temp (uid_rfid, waktu, status_scan, keterangan) VALUES ('$formatted_uid', '$waktu_sekarang', '$status_scan_tag', '$ket_esc')");
+
+    mysqli_query($conn, "
+        INSERT INTO rfid_temp 
+        (uid_rfid, waktu, status_scan, keterangan) 
+        VALUES ('$formatted_uid', '$waktu_sekarang', '$status_scan_tag', '$ket_esc')
+    ");
 
     $response = [
         "status" => "success",
@@ -321,18 +425,25 @@ if ($simpan) {
         echo "$status_kehadiran\n" . substr($nama, 0, 16);
         exit;
     }
+
     echo json_encode($response, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
+
 } else {
+
     http_response_code(500);
+
     $response = [
         "status" => "error",
         "message" => "Gagal menyimpan absensi: " . mysqli_error($conn),
         "sound" => "error"
     ];
+
     if ($format === 'text') {
         echo "ERROR DB\nGAGAL SIMPAN";
         exit;
     }
+
     echo json_encode($response, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
 }
+
 ?>
