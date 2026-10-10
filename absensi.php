@@ -16,6 +16,48 @@ $filter_status = isset($_GET['status']) ? trim($_GET['status']) : '';
 $filter_kelas = isset($_GET['kelas']) ? trim($_GET['kelas']) : '';
 $search = isset($_GET['search']) ? mysqli_real_escape_string($conn, trim($_GET['search'])) : '';
 
+$mode_rekap = (isset($_GET['mode']) && $_GET['mode'] === 'bulanan') ? 'bulanan' : 'harian';
+$bulan_rekap = isset($_GET['bulan']) && preg_match('/^\d{4}-\d{2}$/', $_GET['bulan'])
+    ? $_GET['bulan'] : date('Y-m');
+$tanggal_awal_bulan = $bulan_rekap . '-01';
+$tanggal_akhir_bulan = date('Y-m-t', strtotime($tanggal_awal_bulan));
+
+// Query rekap bulanan: tetap memakai tabel absensi dan siswa yang sudah ada.
+$where_siswa_bulanan = "WHERE 1=1";
+if (!empty($filter_kelas)) {
+    $kelas_bulanan_esc = mysqli_real_escape_string($conn, $filter_kelas);
+    $where_siswa_bulanan .= " AND siswa.kelas = '$kelas_bulanan_esc'";
+}
+if (!empty($search)) {
+    $search_bulanan_esc = mysqli_real_escape_string($conn, trim($_GET['search'] ?? ''));
+    $where_siswa_bulanan .= " AND (siswa.nama LIKE '%$search_bulanan_esc%' OR siswa.nis LIKE '%$search_bulanan_esc%')";
+}
+
+$query_bulanan = false;
+if ($mode_rekap === 'bulanan') {
+    $awal_esc = mysqli_real_escape_string($conn, $tanggal_awal_bulan);
+    $akhir_esc = mysqli_real_escape_string($conn, $tanggal_akhir_bulan);
+    $query_bulanan = mysqli_query($conn, "
+        SELECT
+            siswa.id AS siswa_id,
+            siswa.nis,
+            siswa.nama,
+            siswa.kelas,
+            COUNT(absensi.id) AS total_catatan,
+            COUNT(DISTINCT absensi.tanggal) AS hari_tercatat,
+            COALESCE(SUM(CASE WHEN absensi.status = 'Hadir' THEN 1 ELSE 0 END), 0) AS total_hadir,
+            COALESCE(SUM(CASE WHEN absensi.status = 'Terlambat' THEN 1 ELSE 0 END), 0) AS total_terlambat,
+            COALESCE(SUM(CASE WHEN absensi.jam_pulang IS NOT NULL AND absensi.jam_pulang <> '' THEN 1 ELSE 0 END), 0) AS total_pulang
+        FROM siswa
+        LEFT JOIN absensi
+            ON absensi.siswa_id = siswa.id
+            AND absensi.tanggal BETWEEN '$awal_esc' AND '$akhir_esc'
+        $where_siswa_bulanan
+        GROUP BY siswa.id, siswa.nis, siswa.nama, siswa.kelas
+        ORDER BY siswa.kelas ASC, siswa.nama ASC
+    ");
+}
+
 $where = "WHERE 1=1";
 
 if ($filter_tanggal !== 'semua' && !empty($filter_tanggal)) {
@@ -395,7 +437,7 @@ $nama_sekolah = $setting['nama_sekolah'] ?? 'MTs Matholiul Huda Tlogowungu';
 
     <!-- Kop Cetak saat Print -->
     <div class="print-header">
-        <h3 class="fw-bold mb-0">LAPORAN REKAPITULASI ABSENSI SISWA</h3>
+        <h3 class="fw-bold mb-0"><?= $mode_rekap === 'bulanan' ? 'LAPORAN REKAP ABSENSI BULANAN' : 'LAPORAN REKAPITULASI ABSENSI SISWA' ?></h3>
         <h5 class="mb-1"><?= htmlspecialchars($nama_sekolah) ?></h5>
         <p class="small text-muted mb-3">
             Dicetak pada: <?= date('d/m/Y H:i:s') ?> WIB
@@ -428,6 +470,104 @@ $nama_sekolah = $setting['nama_sekolah'] ?? 'MTs Matholiul Huda Tlogowungu';
 
     <!-- Card Filter & Tabel -->
     <div class="card card-custom p-4">
+
+        <!-- Pilihan Jenis Rekap -->
+        <div class="d-flex flex-wrap gap-2 mb-4 no-print">
+            <a href="absensi.php" class="btn <?= $mode_rekap === 'harian' ? 'btn-primary' : 'btn-outline-primary' ?> rounded-pill px-3">
+                <i class="bi bi-calendar-day me-1"></i> Rekap Harian
+            </a>
+            <a href="absensi.php?mode=bulanan" class="btn <?= $mode_rekap === 'bulanan' ? 'btn-primary' : 'btn-outline-primary' ?> rounded-pill px-3">
+                <i class="bi bi-calendar-month me-1"></i> Rekap Bulanan
+            </a>
+        </div>
+
+        <?php if ($mode_rekap === 'bulanan'): ?>
+            <form method="GET" class="row g-3 align-items-end mb-4 no-print">
+                <input type="hidden" name="mode" value="bulanan">
+                <div class="col-md-3">
+                    <label class="form-label small fw-semibold text-muted">Pilih Bulan</label>
+                    <input type="month" name="bulan" class="form-control" value="<?= htmlspecialchars($bulan_rekap) ?>" required>
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label small fw-semibold text-muted">Kelas</label>
+                    <select name="kelas" class="form-select">
+                        <option value="">Semua Kelas</option>
+                        <?php
+                        mysqli_data_seek($q_kelas, 0);
+                        while ($kb = mysqli_fetch_assoc($q_kelas)):
+                        ?>
+                            <option value="<?= htmlspecialchars($kb['kelas']) ?>" <?= ($filter_kelas == $kb['kelas']) ? 'selected' : '' ?>>
+                                <?= htmlspecialchars($kb['kelas']) ?>
+                            </option>
+                        <?php endwhile; ?>
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label small fw-semibold text-muted">Cari Nama / NIS</label>
+                    <input type="text" name="search" class="form-control" placeholder="Nama atau NIS..." value="<?= htmlspecialchars($_GET['search'] ?? '') ?>">
+                </div>
+                <div class="col-md-3 d-flex gap-2">
+                    <button type="submit" class="btn btn-primary rounded-pill flex-fill"><i class="bi bi-funnel me-1"></i> Terapkan</button>
+                    <a href="absensi.php?mode=bulanan" class="btn btn-light border rounded-pill" title="Reset Filter"><i class="bi bi-arrow-counterclockwise"></i></a>
+                </div>
+            </form>
+
+            <?php if ($query_bulanan && mysqli_num_rows($query_bulanan) > 0): ?>
+                <?php
+                $rekap_rows = [];
+                $rekap_total_siswa = 0;
+                $rekap_total_hadir = 0;
+                $rekap_total_terlambat = 0;
+                $rekap_total_pulang = 0;
+                $rekap_total_catatan = 0;
+                while ($rb = mysqli_fetch_assoc($query_bulanan)) {
+                    $rekap_rows[] = $rb;
+                    $rekap_total_siswa++;
+                    $rekap_total_hadir += (int)$rb['total_hadir'];
+                    $rekap_total_terlambat += (int)$rb['total_terlambat'];
+                    $rekap_total_pulang += (int)$rb['total_pulang'];
+                    $rekap_total_catatan += (int)$rb['total_catatan'];
+                }
+                ?>
+                <div class="mb-3">
+                    <h5 class="fw-bold mb-1"><i class="bi bi-calendar-month text-primary me-2"></i>Rekap Bulan <?= htmlspecialchars(date('F Y', strtotime($tanggal_awal_bulan))) ?></h5>
+                    <p class="text-muted small mb-0">Periode <?= date('d/m/Y', strtotime($tanggal_awal_bulan)) ?>–<?= date('d/m/Y', strtotime($tanggal_akhir_bulan)) ?>. Siswa tanpa catatan tetap ditampilkan.</p>
+                </div>
+                <div class="row g-3 mb-4">
+                    <div class="col-6 col-lg-3"><div class="card border-0 bg-primary-subtle h-100"><div class="card-body"><div class="small text-primary fw-semibold">Siswa Ditampilkan</div><div class="fs-3 fw-bold"><?= $rekap_total_siswa ?></div></div></div></div>
+                    <div class="col-6 col-lg-3"><div class="card border-0 bg-success-subtle h-100"><div class="card-body"><div class="small text-success fw-semibold">Catatan Hadir</div><div class="fs-3 fw-bold"><?= $rekap_total_hadir ?></div></div></div></div>
+                    <div class="col-6 col-lg-3"><div class="card border-0 bg-warning-subtle h-100"><div class="card-body"><div class="small text-warning-emphasis fw-semibold">Catatan Terlambat</div><div class="fs-3 fw-bold"><?= $rekap_total_terlambat ?></div></div></div></div>
+                    <div class="col-6 col-lg-3"><div class="card border-0 bg-info-subtle h-100"><div class="card-body"><div class="small text-info-emphasis fw-semibold">Sudah Pulang</div><div class="fs-3 fw-bold"><?= $rekap_total_pulang ?></div></div></div></div>
+                </div>
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0" id="tableRekapBulanan">
+                        <thead><tr><th>No</th><th>NIS</th><th>Nama Siswa</th><th>Kelas</th><th>Hari Tercatat</th><th>Hadir</th><th>Terlambat</th><th>Sudah Pulang</th><th>Total Catatan</th></tr></thead>
+                        <tbody>
+                        <?php foreach ($rekap_rows as $i => $rb): ?>
+                            <tr>
+                                <td><?= $i + 1 ?></td>
+                                <td class="font-monospace"><?= htmlspecialchars($rb['nis'] ?? '') ?></td>
+                                <td class="fw-bold text-dark"><?= htmlspecialchars($rb['nama'] ?? '') ?></td>
+                                <td><span class="badge bg-light text-dark border"><?= htmlspecialchars($rb['kelas'] ?? '') ?></span></td>
+                                <td><?= (int)$rb['hari_tercatat'] ?></td>
+                                <td><span class="badge bg-success-subtle text-success"><?= (int)$rb['total_hadir'] ?></span></td>
+                                <td><span class="badge bg-warning-subtle text-warning-emphasis"><?= (int)$rb['total_terlambat'] ?></span></td>
+                                <td><?= (int)$rb['total_pulang'] ?></td>
+                                <td class="fw-bold"><?= (int)$rb['total_catatan'] ?></td>
+                            </tr>
+                        <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="d-flex flex-wrap justify-content-between gap-2 mt-3 pt-3 border-top small text-muted">
+                    <span>Total <?= $rekap_total_siswa ?> siswa dalam filter ini</span>
+                    <span><?= $rekap_total_catatan ?> catatan absensi selama bulan terpilih</span>
+                </div>
+            <?php else: ?>
+                <div class="alert alert-info">Belum ada data siswa atau hasil tidak ditemukan untuk filter ini.</div>
+            <?php endif; ?>
+
+        <?php else: ?>
 
         <!-- Form Filter -->
         <form method="GET" class="row g-3 align-items-end mb-4 no-print">
@@ -759,6 +899,8 @@ $nama_sekolah = $setting['nama_sekolah'] ?? 'MTs Matholiul Huda Tlogowungu';
 
         </div>
 
+        <?php endif; // akhir tampilan rekap harian/bulanan ?>
+
     </div>
 
 </div>
@@ -769,7 +911,11 @@ $nama_sekolah = $setting['nama_sekolah'] ?? 'MTs Matholiul Huda Tlogowungu';
 // Fungsi Export Table ke file XLS (Excel)
 function exportToExcel() {
 
-    let table = document.getElementById("tableAbsensi");
+    let table = document.getElementById("tableRekapBulanan") || document.getElementById("tableAbsensi");
+    if (!table) {
+        alert("Tabel rekap tidak ditemukan.");
+        return;
+    }
     let html = table.outerHTML;
 
     let url = 'data:application/vnd.ms-excel;charset=utf-8,' + encodeURIComponent(`
@@ -788,8 +934,9 @@ function exportToExcel() {
             </h3>
 
             <p>
-                Tanggal:
-                <?= ($filter_tanggal === 'semua') ? 'Semua' : $filter_tanggal ?>
+                <?= $mode_rekap === 'bulanan'
+                    ? 'Bulan: ' . htmlspecialchars($bulan_rekap)
+                    : 'Tanggal: ' . (($filter_tanggal === 'semua') ? 'Semua' : htmlspecialchars($filter_tanggal)) ?>
             </p>
 
             ${html}
@@ -804,7 +951,7 @@ function exportToExcel() {
     downloadLink.href = url;
 
     downloadLink.download =
-        `rekap_absensi_${new Date().toISOString().slice(0,10)}.xls`;
+        `rekap_absensi_<?= $mode_rekap === 'bulanan' ? 'bulanan_' . htmlspecialchars($bulan_rekap) : 'harian_' . date('Y-m-d') ?>.xls`;
 
     document.body.appendChild(downloadLink);
 
